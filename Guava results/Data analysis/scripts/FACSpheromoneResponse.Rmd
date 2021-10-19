@@ -1,0 +1,144 @@
+---
+title: "Flow cytometry analysis iGEM 2021"
+author: "Angelo Limeta"
+date: "30/08/2021"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+## Load libraries
+```{r, echo=FALSE}
+library(flowCore)
+library(tidyverse)
+library(viridis)
+library(hrbrthemes)
+library(hexbin)
+library(data.table)
+library(ggpubr)
+
+filter = dplyr::filter
+select = dplyr::select
+```
+
+## Load data
+
+All data is in csv format in the "../data/2021-08-27_at_08-43-55am" folder
+```{r,warning=FALSE}
+filenames = list.files(path = "../data/2021-08-27_at_08-43-55am",full.names = T)
+
+# Extract plate position from filename
+plate_pos = filenames %>% gsub(".CSV","",.) %>% gsub(".*am.","",.)
+
+# Loop through and merge all files into a big tibble
+tbl = tibble()
+for (i in 1:length(filenames)) {
+  tbl_file = fread(filenames[i]) %>% mutate(POS = plate_pos[i])
+  tbl = rbind(tbl,tbl_file)
+}
+rm(tbl_file)
+```
+
+## Pre-procesing
+
+Convert into tidy tibble and add channel info
+```{r}
+tbl_tidy =
+  tbl %>% 
+  pivot_longer(-c(POS,TIME),names_to = "CHANNEL",values_to = "INTENSITY") %>% 
+  mutate(SCALE = ifelse(grepl("Lin",CHANNEL),"lin","log")) %>% 
+  filter(CHANNEL != "RED-R-W")
+
+glimpse(tbl_tidy)
+```
+
+Format meta data
+```{r}
+tbl_meta = 
+  fread(file = "../data/plate_map.csv") %>% 
+  mutate(DOSE = as.character(DOSE))
+```
+
+Merge meta data with flow cytometry data
+```{r}
+tbl_tidy =
+  tbl_tidy %>% 
+  full_join(tbl_meta,by = "POS")
+
+head(tbl_tidy)
+```
+
+Plot Cup1 (log-scale)
+```{r,fig.width=8,fig.height=5}
+tbl_tidy %>% 
+  filter(SCALE == "log") %>% 
+  filter(CHANNEL %in% c("RED-R-HLog")) %>% 
+  filter(INDUCER %in% c("Cup1","None")) %>% 
+  #mutate(DOSE = ifelse(INDUCER == "None",""))
+  mutate(DOSE = factor(DOSE,levels = c("0","1","10","50","100"),ordered = TRUE)) %>%
+  ggplot(aes(x = DOSE,y = INTENSITY,group = DOSE,fill = DOSE)) +
+  geom_violin(color = "black",draw_quantiles = 0.5) +
+  facet_wrap(vars(CASE_CTRL),ncol = 10) +
+  xlab("Copper (uM)") +
+  ylab("Intesity (a.u.)") +
+  theme_bw() +
+  stat_compare_means(ref.group = "0",label = "p.signif")
+  #scale_fill_manual(values = c("green3","red3")) +
+  #scale_color_manual(values = c("green4","red4")) +
+```
+
+Plot Estradiol (log-scale)
+```{r,fig.width=8,fig.height=5}
+tbl_tidy %>% 
+  filter(SCALE == "log") %>% 
+  filter(CHANNEL %in% c("GRN-B-HLog")) %>% 
+  filter(INDUCER %in% c("Estradiol","None")) %>% 
+  #mutate(DOSE = ifelse(INDUCER == "None",""))
+  mutate(DOSE = factor(DOSE,levels = c("0","0.001","0.01","0.1","1"),ordered = TRUE)) %>%
+  ggplot(aes(x = DOSE,y = INTENSITY,group = DOSE,fill = DOSE)) +
+  geom_violin(color = "black",draw_quantiles = 0.5) +
+  facet_wrap(vars(CASE_CTRL),ncol = 10) +
+  xlab("Estradiol (uM)") +
+  ylab("Intesity (a.u.)") +
+  theme_bw() +
+  stat_compare_means(ref.group = "0",label = "p.signif")
+  #scale_fill_manual(values = c("green3","red3")) +
+  #scale_color_manual(values = c("green4","red4")) +
+```
+
+
+Plot data (log)
+```{r,fig.width=12,fig.height=8}
+tbl_tidy %>% 
+  filter(SCALE == "log") %>% 
+  filter(CHANNEL %in% c("GRN-B-HLog","RED-R-HLog")) %>% 
+  ggplot(aes(x = CHANNEL,y = INTENSITY,fill = CHANNEL,color = CHANNEL)) +
+  geom_violin(color = "black") +
+  facet_wrap(vars(POS),ncol = 10) +
+  xlab("") +
+  ylab("Intesity (a.u.)") +
+  theme_bw() +
+  scale_fill_manual(values = c("green3","red3")) +
+  #scale_color_manual(values = c("green4","red4")) +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank())
+```
+
+
+Plot data (linear)
+```{r,fig.width=12,fig.height=8}
+tbl_tidy %>% 
+  filter(SCALE == "lin") %>% 
+  filter(CHANNEL %in% c("GRN-B-HLin","RED-R-HLin")) %>% 
+  ggplot(aes(x = CHANNEL,y = INTENSITY,fill = CHANNEL,color = CHANNEL)) +
+  geom_violin(color = "black") +
+  facet_wrap(vars(POS),ncol = 10) +
+  xlab("") +
+  ylab("Intesity (a.u.)") +
+  theme_bw() +
+  scale_fill_manual(values = c("green3","red3")) +
+  #scale_color_manual(values = c("green4","red4")) +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank())
+```

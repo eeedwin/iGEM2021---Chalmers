@@ -1,0 +1,61 @@
+---
+title: "FACS Response"
+author: "Edwin Eliasson"
+date: "10/13/2021"
+output: html_document
+---
+
+## Load libraries
+```{r, echo=FALSE}
+
+library(flowCore)
+library(tidyverse)
+library(viridis)
+library(hrbrthemes)
+library(hexbin)
+library(data.table)
+library(ggpubr)
+
+filter = dplyr::filter
+select = dplyr::select
+
+```
+
+## Load data
+
+All data is in csv format in the "../data/2021-08-27_at_08-43-55am" folder
+```{r,warning=FALSE}
+filenames = list.files(path = "../Data/FACS_2021_09_09/iGEM_992021 23858 PM/Sample_Group_1/",full.names = T)
+
+# Extract plate position from filename
+plate_pos = filenames %>% gsub(".CSV","",.) %>% gsub(".*am.","",.)
+
+# Loop through and merge all files into a big tibble
+tbl = tibble()
+for (i in 1:length(filenames)) {
+  tbl_file = fread(filenames[i]) %>% mutate(POS = plate_pos[i])
+  tbl = rbind(tbl,tbl_file)
+}
+rm(tbl_file) 
+```
+
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

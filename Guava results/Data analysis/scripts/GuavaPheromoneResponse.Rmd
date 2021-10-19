@@ -1,0 +1,303 @@
+---
+title: "R Notebook"
+author: "Andrea Clausen Lind"
+date: "31/08/2021"
+output: html_notebook
+---
+
+
+## Load libraries
+```{r, echo=FALSE}
+library(flowCore)
+library(tidyverse)
+library(viridis)
+library(hrbrthemes)
+library(hexbin)
+```
+
+## Set working directory 
+```{r,warning=FALSE}
+setwd("~/Google Drive/CHALMERS/iGEM/WetLAB/Guava results/Data analysis/scripts")
+```
+
+## Load data
+```{r,warning=FALSE}
+list.files("../data/2021-08-27_at_08-43-55am/")
+
+csv_gateA <- list.files("../data/2021-08-27_at_08-43-55am/", full.names = T)  %>% 
+  lapply(., read.delim, sep = ",") 
+
+summary(csv_gateA)
+
+metadata <- read.csv("./plate_map.csv", sep = ";") 
+
+head(metadata)
+
+```
+
+## Format meta data
+```{r}
+
+meta_data_A = 
+  tibble(file_id = list.files("../data/2021-08-27_at_08-43")) %>% 
+  mutate(sample_id = gsub(".CSV","",.)) %>% 
+  mutate(well = gsub("../data/2021-08-27_at_08-43-55am/","",sample_id)) 
+
+meta_data_A <-  merge(meta_data_A, by.x = "well", y = "POS") %>% 
+  separate(col = Strain, into = c("Strain","Replicate"), sep = "_",remove = F)# %>% 
+  #mutate(mat_pep_conc = ifelse(grepl("nM",mat_pep_conc),gsub("nM","",mat_pep_conc),"1000"))
+
+head(meta_data_A) 
+
+```
+
+## Convert the csv data into a tidy tibble
+```{r}
+# initialize empty data frame
+df_flow_A = data.frame()
+
+# Get no. of files
+no_files = length(csv_gateA)
+
+# loop through all files and add each file data to empty data frame
+for (i in 1:no_files) {
+  
+  # Extract file name
+  well = meta_data_A$well[i]
+  
+  # Convert data to tibble and add file name
+  file_data =
+    csv_gateA[[i]] %>% 
+    as_tibble() %>% 
+    mutate(WELL = well)
+  
+  # Join with empty data frame
+  df_flow_A = rbind(df_flow_A,file_data)
+}
+
+head(df_flow_A)
+head(meta_data_A)
+```
+
+
+## Join with metadata
+```{r}
+
+df_full_A = 
+  df_flow_A %>% 
+  full_join(meta_data_A,by = c("WELL" = "well")) %>% 
+  mutate(strain = Strain, mating_peptide = Mating_Peptide, concentration_nM = Concentration_nM, replicate = Replicate) %>% 
+  select(-file_id, -sample_id, -Strain, -Mating_Peptide, -Concentration_nM, -Replicate) 
+
+
+# %>% 
+#   rename("FSC-A" = "FSC.A", "sample_id" = "FILE_NAME", "eGFP" = "EGFP.A.Compensated", "miRFP670" = "miRFP670.A.Compensated") 
+
+head(df_full_A)
+```
+
+## Filter out cells with negative intensity and log transform
+```{r}
+df_full_A =
+  df_full_A %>%
+  filter(GRN.B.HLog > 0) %>%
+  filter(RED.R.HLog > 0) %>%
+  filter(FSC.HLin > 100) %>%
+  #mutate(strain = factor(strain,levels = c("APS2_A","RFP_A","ASC1 XII-1T1-RFP-C1_A","APS2 XI-2T1-RFP_A"), ordered = T)) %>%
+  mutate(replicate = factor(replicate)) %>%
+  mutate(concentration_nM = factor(concentration_nM))
+
+head(df_full_A)
+
+```
+
+
+## Plot distributions and save results for gated data
+```{r}
+
+p_density_all_RFP =
+  df_full_A %>% 
+  ggplot(aes(RED.R.HLog, color = strain, fill = replicate)) +
+  geom_density(alpha = 0.1, adjust = 0.0001) +
+  scale_color_viridis(discrete = T,direction = -1, option = "A",begin = 0.2, end=0.8) +
+  scale_fill_viridis(discrete = T,direction = -1, option = "A",begin = 0.2, end=0.8) +
+  theme_bw() +
+  xlab("miRFP670 (a.u., log-scale)") +
+  theme(aspect.ratio = 1)
+
+p_density_all_GPF =
+  df_full_A %>% 
+  filter(strain == c("ASC201")) %>% 
+  ggplot(aes(GRN.B.HLog, color = concentration_nM, fill = concentration_nM)) +
+  geom_density(alpha = 0.1, adjust = 0.0001) +
+  facet_wrap(vars(concentration_nM, mating_peptide),nrow = 3) +
+  scale_color_viridis(discrete = T,direction = -1, option = "A",begin = 0.2, end=0.8) +
+  scale_fill_viridis(discrete = T,direction = -1, option = "A",begin = 0.2, end=0.8) +
+  theme_bw() +
+  xlab("sfGFP (a.u., log-scale)") +
+  theme(aspect.ratio = 1)
+
+p_density_all_GPF_Sc =
+  df_full_A %>% 
+  filter(strain == c("ASC201"), mating_peptide == "Sc") %>% 
+  ggplot(aes(GRN.B.HLog, color = concentration_nM, fill = concentration_nM)) +
+  geom_density(alpha = 0.1, adjust = 0.0001) +
+  #facet_wrap(vars(concentration_nM, mating_peptide),nrow = 3) +
+  scale_color_viridis(discrete = T,direction = -1, option = "A",begin = 0.2, end=0.8) +
+  scale_fill_viridis(discrete = T,direction = -1, option = "A",begin = 0.2, end=0.8) +
+  theme_bw() +
+  xlab("sfGFP (a.u., log-scale)") +
+  theme(aspect.ratio = 1)
+
+p_density_all_GPF_Cau =
+  df_full_A %>% 
+  filter(strain == c("ASC201"), mating_peptide == "Cau") %>% 
+  ggplot(aes(GRN.B.HLog, color = concentration_nM, fill = concentration_nM)) +
+  geom_density(alpha = 0.1, adjust = 0.0001) +
+  #facet_wrap(vars(concentration_nM, mating_peptide),nrow = 3) +
+  scale_color_viridis(discrete = T,direction = -1, option = "A",begin = 0.2, end=0.8) +
+  scale_fill_viridis(discrete = T,direction = -1, option = "A",begin = 0.2, end=0.8) +
+  theme_bw() +
+  xlab("sfGFP (a.u., log-scale)") +
+  theme(aspect.ratio = 1)
+
+p_density_all_GPF_Cl =
+  df_full_A %>% 
+  filter(strain == c("ASC201"), mating_peptide == "Cl") %>% 
+  ggplot(aes(GRN.B.HLog, color = concentration_nM, fill = concentration_nM)) +
+  geom_density(alpha = 0.1, adjust = 0.0001) +
+  #facet_wrap(vars(concentration_nM, mating_peptide),nrow = 3) +
+  scale_color_viridis(discrete = T,direction = -1, option = "A",begin = 0.2, end=0.8) +
+  scale_fill_viridis(discrete = T,direction = -1, option = "A",begin = 0.2, end=0.8) +
+  theme_bw() +
+  xlab("sfGFP (a.u., log-scale)") +
+  theme(aspect.ratio = 1)
+
+p_violin_all_GPF_Sc =
+  df_full_A %>% 
+  filter(strain == c("ASC201"), mating_peptide == "Sc") %>% 
+  ggplot(aes(x=concentration_nM, y=GRN.B.HLog, color = concentration_nM, fill = concentration_nM)) +
+  geom_violin(alpha = 0.1, adjust = 0.0001) +
+  #facet_wrap(vars(concentration_nM, mating_peptide),nrow = 3) +
+  scale_color_viridis(discrete = T,direction = -1, option = "A",begin = 0.2, end=0.8) +
+  scale_fill_viridis(discrete = T,direction = -1, option = "A",begin = 0.2, end=0.8) +
+  theme_bw() +
+  xlab("sfGFP (a.u., log-scale)") +
+  theme(aspect.ratio = 1)
+
+p_violin_all_GPF_Sc_facet =
+  df_full_A %>% 
+  filter(strain == c("ASC201"), mating_peptide == "Sc") %>% 
+  ggplot(aes(x=concentration_nM, y=GRN.B.HLog, color = concentration_nM, fill = concentration_nM)) +
+  geom_violin(alpha = 0.1, adjust = 0.0001) +
+  facet_wrap(vars(replicate),nrow = 3) +
+  scale_color_viridis(discrete = T,direction = -1, option = "A",begin = 0.2, end=0.8) +
+  scale_fill_viridis(discrete = T,direction = -1, option = "A",begin = 0.2, end=0.8) +
+  theme_bw() +
+  xlab("sfGFP (a.u., log-scale)") +
+  theme(aspect.ratio = 0.5)
+
+p_violin_all_GPF_Cau =
+  df_full_A %>% 
+  filter(strain == c("ASC201"), mating_peptide == "Cau") %>% 
+  ggplot(aes(x=concentration_nM, y=GRN.B.HLog, color = concentration_nM, fill = concentration_nM)) +
+  geom_violin(alpha = 0.1, adjust = 0.0001) +
+  #facet_wrap(vars(concentration_nM, mating_peptide),nrow = 3) +
+  scale_color_viridis(discrete = T,direction = -1, option = "A",begin = 0.2, end=0.8) +
+  scale_fill_viridis(discrete = T,direction = -1, option = "A",begin = 0.2, end=0.8) +
+  theme_bw() +
+  xlab("sfGFP (a.u., log-scale)") +
+  theme(aspect.ratio = 1)
+
+p_violin_all_GPF_Cl =
+  df_full_A %>% 
+  filter(strain == c("ASC201"), mating_peptide == "Cl") %>% 
+  ggplot(aes(x=concentration_nM, y=GRN.B.HLog, color = concentration_nM, fill = concentration_nM)) +
+  geom_violin(alpha = 0.1, adjust = 0.0001) +
+  #facet_wrap(vars(concentration_nM, mating_peptide),nrow = 3) +
+  scale_color_viridis(discrete = T,direction = -1, option = "A",begin = 0.2, end=0.8) +
+  scale_fill_viridis(discrete = T,direction = -1, option = "A",begin = 0.2, end=0.8) +
+  theme_bw() +
+  xlab("sfGFP (a.u., log-scale)") +
+  theme(aspect.ratio = 1)
+
+p_density2d_ASC201_RFP =
+  df_full_A %>% 
+  filter(strain == c("ASC201"), concentration_nM == 1000) %>% 
+  ggplot(aes(x=GRN.B.HLog, y=RED.R.HLog)) +
+  geom_hex(bins = 100) +
+  scale_fill_viridis(discrete = F,direction = -1, option = "A",begin = 0, end=0.9) +
+  theme_bw() +
+  xlab("sfGFP (a.u., log-scale)") +
+  ylab("miRFP670 (a.u., log-scale)")
+  theme(legend.position = "none", 
+        aspect.ratio = 1) 
+  
+p_density2d_ASC201_FSC =
+  df_full_A %>% 
+  filter(strain == c("ASC201"), concentration_nM == 1000) %>% 
+  ggplot(aes(x=GRN.B.HLog, y=FSC.HLog)) +
+  geom_hex(bins = 100) +
+  scale_fill_viridis(discrete = F,direction = -1, option = "A",begin = 0, end=0.9) +
+  theme_bw() +
+  xlab("sfGFP (a.u., log-scale)") +
+  ylab("FSC (a.u., log-scale)")
+  theme(legend.position = "none", 
+        aspect.ratio = 1) 
+
+p_density2d_ASC201_Sc =
+  df_full_A %>% 
+  filter(strain == c("ASC201")) %>% 
+  ggplot(aes(x=GRN.B.HLog, y=FSC.HLog)) +
+  geom_hex(bins = 100) +
+  facet_wrap(vars(concentration_nM, mating_peptide),nrow = 3) +
+  scale_fill_viridis(discrete = F,direction = -1, option = "A",begin = 0, end=0.9) +
+  theme_bw() +
+  xlab("sfGFP (a.u., log-scale)") +
+  ylab("FSC (a.u., log-scale)")
+  theme(legend.position = "none", 
+        aspect.ratio = 1) 
+
+
+p_density_all_RFP
+p_density_all_GPF
+p_density_all_GPF_Sc
+p_density_all_GPF_Cau
+p_density_all_GPF_Cl
+p_violin_all_GPF_Sc
+p_violin_all_GPF_Sc_facet
+p_violin_all_GPF_Cau
+p_violin_all_GPF_Cl
+#p_density2d_ASC201_RFP
+#p_density2d_ASC201_FSC
+p_density2d_ASC201
+
+
+#c("APS2_A","RFP_A","ASC1 XII-1T1-RFP-C1_A","APS2 XI-2T1-RFP_A")
+
+# ggsave(p_density_all_RFP, filename = "histogram_all_RFP.png",width = 6, height = 4)
+# ggsave(p_density_all_GPF, filename = "histogram_facet_all_GPF.png",width = 6, height = 4)
+# 
+# ggsave(p_density_all_GPF_Sc, filename = "histogram_ASC201_GPF_Sc.png",width = 6, height = 4)
+# ggsave(p_density_all_GPF_Cau, filename = "histogram_ASC201_GPF_Cau.png",width = 6, height = 4)
+# ggsave(p_density_all_GPF_Cl, filename = "histogram_ASC201_GPF_Cl.png",width = 6, height = 4)
+# 
+# ggsave(p_violin_all_GPF_Sc, filename = "violin_ASC201_GPF_Sc.png",width = 6, height = 4)
+# ggsave(p_violin_all_GPF_Cau, filename = "violin_ASC201_GPF_Cau.png",width = 6, height = 4)
+# ggsave(p_violin_all_GPF_Cl, filename = "violin_ASC201_GPF_Cl.png",width = 6, height = 4)
+# ggsave(p_violin_all_GPF_Sc_facet, filename = "violin_facet_ASC201_GPF_Sc.png",width = 6, height = 4)
+# 
+# ggsave(p_density2d_ASC201, filename = "contour_facet_ASC201_GPF.png",width = 6, height = 4)
+```
+
+```{r}
+df_full %>% 
+  mutate(test_log = log10(eGFP)) %>% 
+  filter(is.nan(test_log))
+```
+## Find specific color IDs from viridis package
+```{r}
+library(scales)
+show_col(viridis_pal(option = "A")(40))
+````
+

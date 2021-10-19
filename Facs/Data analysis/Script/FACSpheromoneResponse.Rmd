@@ -1,0 +1,319 @@
+---
+title: "R Notebook"
+author: "Andrea Clausen Lind"
+date: "23/03/2021"
+output: html_notebook
+---
+
+
+## Load libraries
+```{r, echo=FALSE}
+library(flowCore)
+library(tidyverse)
+library(viridis)
+library(hrbrthemes)
+library(hexbin)
+```
+
+## Set working directory 
+```{r,warning=FALSE}
+setwd("/Users/lindandr/OneDrive - Chalmers University of Technology/PhD/Projects/Pathogen biosensor/Results/FACS/2021-07-28_RFP evaluation")
+```
+
+## Load data
+```{r,warning=FALSE}
+fs <- read.flowSet(path = "./Sample Group - 1/")
+summary(fs)
+
+csv_gateA <- list.files("./Sample Group - 1 - Gate A/", full.names = T)  %>% 
+  lapply(., read.delim, sep = ",")
+
+summary(csv_gateA)
+
+```
+
+## Format meta data
+```{r}
+meta_data = 
+  tibble(file_id = names(fs@frames)) %>% 
+  mutate(sample_id = gsub(".fcs","",file_id)) %>% 
+  mutate(strain = gsub("_Data Source - 1","",sample_id))
+
+#%>% 
+  #separate(col = sample_id, into = c("strain","replicate","mat_pep_conc"), sep = "_",remove = F) %>% 
+  #mutate(mat_pep_conc = ifelse(grepl("nM",mat_pep_conc),gsub("nM","",mat_pep_conc),"1000"))
+
+head(meta_data) 
+
+meta_data_A = 
+  tibble(file_id = list.files("./Sample Group - 1 - Gate A/")) %>% 
+  mutate(sample_id = gsub(".csv","",file_id)) %>% 
+  mutate(strain = gsub("_Data Source - 1","",sample_id)) 
+
+#%>% 
+  #separate(col = sample_id, into = c("strain","replicate","mat_pep_conc"), sep = "_",remove = F) %>% 
+  #mutate(mat_pep_conc = ifelse(grepl("nM",mat_pep_conc),gsub("nM","",mat_pep_conc),"1000"))
+
+head(meta_data_A) 
+
+```
+
+## Let's extract the fs data as a tidy tibble
+```{r}
+# extract data from fs object
+list = as.list(fs@frames)
+
+# initialize empty data frame
+df_flow = data.frame()
+
+# Get no. of files
+no_files = length(list)
+
+# loop through all files and add each file data to empty data frame
+for (i in 1:no_files) {
+  
+  # Extract file name
+  file_name = names(list)[i]
+  
+  # Convert data to tibble and add file name
+  file_data =
+    list[[i]]@exprs %>% 
+    as_tibble() %>% 
+    mutate(FILE_NAME = file_name)
+  
+  # Join with empty data frame
+  df_flow = rbind(df_flow,file_data)
+}
+```
+
+
+## Convert the csv data into a tidy tibble
+```{r}
+# initialize empty data frame
+df_flow_A = data.frame()
+
+# Get no. of files
+no_files = length(csv_gateA)
+
+# loop through all files and add each file data to empty data frame
+for (i in 1:no_files) {
+  
+  # Extract file name
+  file_name = meta_data_A$sample_id[i]
+  
+  # Convert data to tibble and add file name
+  file_data =
+    csv_gateA[[i]] %>% 
+    as_tibble() %>% 
+    mutate(FILE_NAME = file_name)
+  
+  # Join with empty data frame
+  df_flow_A = rbind(df_flow_A,file_data)
+}
+
+head(df_flow_A)
+head(meta_data_A)
+```
+
+
+## Join with metadata
+```{r}
+df_full = 
+  df_flow %>% 
+  full_join(meta_data,by = c("FILE_NAME" = "file_id")) %>% 
+  select(-FILE_NAME) %>% 
+  rename("eGFP" = "FL2-A", "miRFP670" = "FL4-A") 
+
+head(df_full)
+
+df_full_A = 
+  df_flow_A %>% 
+  full_join(meta_data_A,by = c("FILE_NAME" = "sample_id")) %>% 
+  select(-file_id, -Index) %>% 
+  rename("FSC-A" = "FSC.A", "sample_id" = "FILE_NAME", "eGFP" = "EGFP.A.Compensated",) 
+
+head(df_full_A)
+```
+
+## Filter out cells with negative intensity and log transform
+```{r}
+df_full = 
+  df_full %>% 
+  filter(eGFP > 0) %>% 
+  mutate(log_eGFP = log10(eGFP+1)) %>%
+  filter(miRFP670 > 0) %>% 
+  mutate(log_miRFP670 = log10(miRFP670+1)) %>% 
+  filter(`FSC-A` > 0) %>% 
+  mutate(`log_FSC-A` = log10(`FSC-A`+1)) %>%
+  mutate(strain = factor(strain,levels = c("APS2","RFP","ASC1 XII-1T1-RFP-C1","APS2 XI-2T1-RFP"), ordered = T))
+
+head(df_full)
+
+df_full_A = 
+  df_full_A %>% 
+  filter(eGFP > 0) %>% 
+  mutate(log_eGFP = log10(eGFP+1)) %>%
+  filter(miRFP670 > 0) %>% 
+  mutate(log_miRFP670 = log10(miRFP670+1)) %>% 
+  filter(`FSC-A` > 0) %>% 
+  mutate(`log_FSC-A` = log10(`FSC-A`+1)) %>%
+  mutate(strain = factor(strain,levels = c("APS2_A","RFP_A","ASC1 XII-1T1-RFP-C1_A","APS2 XI-2T1-RFP_A"), ordered = T)) 
+
+head(df_full_A)
+
+```
+
+
+## Plot distributions and save results for non-gated data
+```{r}
+
+p_density_all =
+  df_full %>% 
+  #filter(strain == c("APS2","RFP","ASC1 XII-1T1-RFP-C1")) %>% 
+  mutate(strain = factor(strain,levels = c("APS2","RFP","ASC1 XII-1T1-RFP-C1"), ordered = T)) %>% 
+  ggplot(aes(log_miRFP670, color = strain, fill = strain)) +
+  geom_density(alpha = 0.1, adjust = 0.0001) +
+  scale_color_viridis(discrete = T,direction = -1, option = "A",begin = 0.2, end=0.8) +
+  scale_fill_viridis(discrete = T,direction = -1, option = "A",begin = 0.2, end=0.8) +
+  theme_bw() +
+  xlab("miRFP670 (a.u., log-scale)") +
+  theme(aspect.ratio = 1)
+
+p_density2d_ASC2 =
+  df_full %>% 
+  filter(strain == c("ASC1 XII-1T1-RFP-C1")) %>% 
+  ggplot(aes(x=log_miRFP670, y=`FSC-A`)) +
+  geom_hex(bins = 100) +
+  scale_fill_viridis(discrete = F,direction = -1, option = "A",begin = 0, end=0.9) +
+  theme_bw() +
+  xlab("miRFP670 (a.u., log-scale)") +
+  theme(legend.position = "none", 
+        aspect.ratio = 1) 
+
+p_density2d_ASC2_APS2 =
+  df_full %>% 
+  filter(strain == c("APS2", "ASC1 XII-1T1-RFP-C1")) %>% 
+  ggplot(aes(x=log_miRFP670, y=`FSC-A`)) +
+  geom_hex(bins = 100) +
+  facet_wrap(vars(strain),nrow = 2) +
+  scale_fill_viridis(discrete = F,direction = -1, option = "A",begin = 0, end=0.9) +
+  theme_bw() +
+  xlab("miRFP670 (a.u., log-scale)") +
+  theme(legend.position = "none", 
+        aspect.ratio = 0.5) 
+
+p_density2d_all =
+  df_full %>%
+  filter(strain == c("APS2","RFP","ASC1 XII-1T1-RFP-C1")) %>% 
+  ggplot(aes(x = log_miRFP670, y = `FSC-A`)) +
+  geom_hex(bins = 100) +
+  facet_wrap(vars(strain),nrow = 3) +
+  scale_fill_viridis(discrete = F,direction = -1, option = "A",begin = 0, end=0.9) +
+  theme_bw() +
+  xlab("miRFP670 (a.u., log-scale)") +
+  ylab("FSC-A") +
+  xlim(0,5) +
+  theme(aspect.ratio = 0.3)
+
+p_density_all_ridge =
+  df_full %>% 
+  #filter(strain == c("APS2","RFP","ASC1 XII-1T1-RFP-C1")) %>% 
+  mutate(strain = factor(strain,levels = c("APS2","RFP","ASC1 XII-1T1-RFP-C1"), ordered = T)) %>% 
+  filter(strain == c("APS2","RFP","ASC1 XII-1T1-RFP-C1")) %>%
+  ggplot(aes(x = log_miRFP670, y = strain, color = strain, fill = strain)) +
+  geom_density_ridges(alpha = 0.1, stat = "binline", binwidth = 0.01) +
+  scale_color_viridis(discrete = T,direction = -1, option = "A",begin = 0.2, end=0.8) +
+  scale_fill_viridis(discrete = T,direction = -1, option = "A",begin = 0.2, end=0.8) +
+  theme_bw() +
+  theme_classic() +
+  xlab("miRFP670 (a.u., log-scale)") +
+  theme(legend.position = "none", aspect.ratio = 1)
+
+
+p_density_all
+p_density2d_ASC2
+p_density2d_ASC2_APS2
+p_density2d_all
+p_density_all_ridge 
+
+#ggsave(p_full, filename = "average_FACS.png",width = 6, height = 4)
+#ggsave(p_partial, filename = "replicate_FACS.png",width = 6, height = 4)
+#ggsave(p_density_all_ridge, filename = "ridge_RFP_ASC2.png",width = 6, height = 4)
+```
+
+## Plot distributions and save results for gated data
+```{r}
+
+p_density_all_A =
+  df_full_A %>% 
+  filter(strain == c("APS2_A","RFP_A","ASC1 XII-1T1-RFP-C1_A")) %>% 
+  mutate(strain = factor(strain,levels = c("APS2_A","RFP_A","ASC1 XII-1T1-RFP-C1_A"), ordered = T)) %>%
+  ggplot(aes(log_miRFP670, color = strain, fill = strain)) +
+  geom_density(alpha = 0.1, adjust = 0.0001) +
+  scale_color_viridis(discrete = T,direction = -1, option = "A",begin = 0.2, end=0.8) +
+  scale_fill_viridis(discrete = T,direction = -1, option = "A",begin = 0.2, end=0.8) +
+  theme_bw() +
+  xlab("miRFP670 (a.u., log-scale)") +
+  theme(aspect.ratio = 1)
+
+p_density2d_ASC2_A =
+  df_full_A %>% 
+  filter(strain == c("ASC1 XII-1T1-RFP-C1_A")) %>% 
+  ggplot(aes(x=log_miRFP670, y=`FSC-A`)) +
+  geom_hex(bins = 100) +
+  scale_fill_viridis(discrete = F,direction = -1, option = "A",begin = 0, end=0.9) +
+  theme_bw() +
+  xlab("miRFP670 (a.u., log-scale)") +
+  theme(legend.position = "none", 
+        aspect.ratio = 1) 
+
+p_density2d_ASC2_APS2_A =
+  df_full_A %>% 
+  filter(strain == c("APS2_A", "ASC1 XII-1T1-RFP-C1_A")) %>% 
+  ggplot(aes(x=log_miRFP670, y=`FSC-A`)) +
+  geom_hex(bins = 100) +
+  facet_wrap(vars(strain),nrow = 2) +
+  scale_fill_viridis(discrete = F,direction = -1, option = "A",begin = 0, end=0.9) +
+  theme_bw() +
+  xlab("miRFP670 (a.u., log-scale)") +
+  theme(legend.position = "none", 
+        aspect.ratio = 0.5) 
+
+p_density2d_all_A =
+  df_full_A %>%
+  filter(strain == c("APS2_A","RFP_A","ASC1 XII-1T1-RFP-C1_A")) %>% 
+  ggplot(aes(x = log_miRFP670, y = `FSC-A`)) +
+  geom_hex(bins = 100) +
+  facet_wrap(vars(strain),nrow = 3) +
+  scale_fill_viridis(discrete = F,direction = -1, option = "A",begin = 0, end=0.9) +
+  theme_bw() +
+  xlab("miRFP670 (a.u., log-scale)") +
+  ylab("FSC-A") +
+  xlim(0,5) +
+  theme(aspect.ratio = 0.3)
+
+
+p_density_all_A
+p_density2d_ASC2_A
+p_density2d_ASC2_APS2_A
+p_density2d_all_A
+
+#c("APS2_A","RFP_A","ASC1 XII-1T1-RFP-C1_A","APS2 XI-2T1-RFP_A")
+
+#ggsave(p_density_all_A, filename = "histogram_FACS_gated_all.png",width = 6, height = 4)
+ggsave(p_density_all_A, filename = "histogram_FACS_gated.png",width = 6, height = 4)
+
+#ggsave(p_density2d_all_A, filename = "2Ddensity_FACS_gated.png",width = 6, height = 4)
+```
+
+```{r}
+df_full %>% 
+  mutate(test_log = log10(eGFP)) %>% 
+  filter(is.nan(test_log))
+```
+## Find specific color IDs from viridis package
+```{r}
+library(scales)
+show_col(viridis_pal(option = "A")(40))
+````
+
